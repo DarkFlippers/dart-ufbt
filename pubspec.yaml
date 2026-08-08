@@ -1,7 +1,9 @@
 name: dartufbt
 description: Native Dart port of uFBT - Flipper Zero SDK deployment and FAP build tool.
 version: 0.1.0
-publish_to: "none"
+repository: https://github.com/DarkFlippers/dart-ufbt
+issue_tracker: https://github.com/DarkFlippers/dart-ufbt/issues
+topics: [flipper-zero, embedded, sdk, build-tool]
 
 environment:
   sdk: ^3.11.1
