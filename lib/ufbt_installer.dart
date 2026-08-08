@@ -91,7 +91,7 @@ class UfbtInstaller {
   }) : paths = paths ?? UfbtPaths.resolve(),
        _fetcher = fetcher ?? UfbtFileFetcher(logger: logger);
 
-  static const String packageVersion = '0.1.0';
+  static const String packageVersion = '0.1.1';
 
   final UfbtLogger logger;
   final UfbtPaths paths;
