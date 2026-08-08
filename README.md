@@ -6,6 +6,8 @@
 Native Dart port of [uFBT](https://github.com/flipperdevices/flipperzero-ufbt) — deploys the
 Flipper Zero SDK and builds `.fap` applications. No Python, no SCons, no shell.
 
+Built for [qUnleashed](https://github.com/DarkFlippers/qUnleashed), a Flipper Zero companion app.
+
 ## Features
 
 - **SDK deployment** — release / release-candidate / dev channels, a firmware branch, a direct
