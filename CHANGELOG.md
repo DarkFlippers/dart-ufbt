@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2
+
+- Meta data fix
+
 ## 0.1.1
 
 - Add an example.
