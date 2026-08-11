@@ -1,5 +1,6 @@
 # dartufbt
 
+[![source](https://img.shields.io/badge/source-GitHub-181717.svg?logo=github)](https://github.com/DarkFlippers/dart-ufbt)
 [![pub package](https://img.shields.io/pub/v/dartufbt.svg)](https://pub.dev/packages/dartufbt)
 [![license](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 
@@ -7,6 +8,8 @@ Native Dart port of [uFBT](https://github.com/flipperdevices/flipperzero-ufbt) �
 Flipper Zero SDK and builds `.fap` applications. No Python, no SCons, no shell.
 
 Built for [qUnleashed](https://github.com/DarkFlippers/qUnleashed), a Flipper Zero companion app.
+Made by [ApertureFox Technology](https://github.com/apfxtech) at
+[DarkFlippers](https://github.com/DarkFlippers).
 
 ## Features
 
@@ -17,6 +20,11 @@ Built for [qUnleashed](https://github.com/DarkFlippers/qUnleashed), a Flipper Ze
   embeds icons and file assets, writes FastFAP relocation tables and `.fapmeta`.
 - **Structured logging** — events reach sinks as objects, so a GUI can render progress instead
   of scraping stdout.
+
+## Platforms
+
+Desktop only — **Linux, macOS, Windows**. Android and iOS are not supported: the ARM GCC
+toolchain has no host build for them, and iOS forbids running downloaded executables at all.
 
 ## Install
 
@@ -63,6 +71,11 @@ it against the channel head.
 Everything lives under `~/.ufbt` — SDK in `current/`, toolchain in `toolchain/`, archives in
 `download/`. Override with `UFBT_HOME` and `FBT_TOOLCHAIN_PATH`, from the environment or from a
 `.env` file next to the project.
+
+## See also
+
+- [flipperlib](https://pub.dev/packages/flipperlib) — talk to a Flipper Zero: connection over
+  BLE / USB and the RPC protocol on top of it. Build the `.fap` here, ship it with flipperlib.
 
 ## License
 

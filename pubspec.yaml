@@ -5,6 +5,11 @@ repository: https://github.com/DarkFlippers/dart-ufbt
 issue_tracker: https://github.com/DarkFlippers/dart-ufbt/issues
 topics: [flipper-zero, embedded, sdk, build-tool]
 
+platforms:
+  linux:
+  macos:
+  windows:
+
 environment:
   sdk: ^3.11.1
 
