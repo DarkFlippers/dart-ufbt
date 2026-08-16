@@ -24,6 +24,13 @@ class FapBuildException implements Exception {
   String toString() => message;
 }
 
+/// Nothing could be compiled because the SDK or the toolchain is missing, as
+/// opposed to an app that fails to build: the caller may run the same build
+/// somewhere else.
+class FapEnvironmentException extends FapBuildException {
+  const FapEnvironmentException(super.message);
+}
+
 class FapBuildResult {
   const FapBuildResult({
     required this.success,
@@ -61,7 +68,7 @@ class FapBuilder {
   Map<String, dynamic> get _components {
     final file = File(UfbtPaths.join(_sdkDir.path, 'components.json'));
     if (!file.existsSync()) {
-      throw const FapBuildException(
+      throw const FapEnvironmentException(
         'SDK is not deployed: components.json not found',
       );
     }
@@ -80,7 +87,7 @@ class FapBuilder {
     );
     final file = File(Platform.isWindows ? '$path.exe' : path);
     if (!file.existsSync()) {
-      throw FapBuildException('Toolchain binary not found: ${file.path}');
+      throw FapEnvironmentException('Toolchain binary not found: ${file.path}');
     }
     return file.path;
   }
@@ -119,6 +126,8 @@ class FapBuilder {
     for (final app in ordered) {
       try {
         results.add(await _buildApp(app, out, apps));
+      } on FapEnvironmentException {
+        rethrow;
       } on FapBuildException catch (e) {
         logger.error('$e');
         results.add(FapBuildResult(success: false, app: app, error: '$e'));
