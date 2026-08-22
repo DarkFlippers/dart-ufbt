@@ -41,12 +41,7 @@ class UfbtToolchainDeployer {
   final UfbtPaths paths;
   final UfbtFileFetcher fetcher;
 
-  String get archDirName {
-    if (Platform.isWindows) return 'x86_64-windows';
-    final arch = _uname('-m');
-    final sys = _uname('-s').toLowerCase();
-    return '$arch-$sys';
-  }
+  String get archDirName => UfbtPaths.hostArchDir;
 
   String get toolchainVersion {
     final override = Platform.environment['FBT_TOOLCHAIN_VERSION'];
@@ -141,8 +136,7 @@ class UfbtToolchainDeployer {
     distDir.renameSync(archDir.path);
 
     logger.raw("linking toolchain to 'current'..", newline: false);
-    currentLink.createSync(archDir.path);
-    logger.raw('done');
+    logger.raw(await _linkCurrent(archDir) ? 'done' : 'skipped');
 
     _cleanup();
     return true;
@@ -195,12 +189,47 @@ class UfbtToolchainDeployer {
     distDir.renameSync(archDir.path);
 
     logger.raw("linking to 'current'..", newline: false);
-    currentLink.createSync(archDir.path);
-    logger.raw('done!');
+    logger.raw(await _linkCurrent(archDir) ? 'done!' : 'skipped');
 
     logger.raw('Cleaning up temporary files..', newline: false);
     if (archiveFile.existsSync()) archiveFile.deleteSync();
     logger.raw('done!');
+    return true;
+  }
+
+  /// Points 'current' at the deployed toolchain the way fbtenv does: a
+  /// junction on Windows, where a symlink would need admin rights, a symlink
+  /// elsewhere. An unlinked toolchain still builds from its arch dir, so a
+  /// failure here only warns instead of failing the deploy.
+  Future<bool> _linkCurrent(Directory archDir) async {
+    final link = paths.toolchainCurrentLink;
+    try {
+      if (Platform.isWindows) {
+        final result = await Process.run('cmd', [
+          '/c',
+          'mklink',
+          '/J',
+          link.path,
+          archDir.path,
+        ]);
+        if (result.exitCode != 0) {
+          throw ProcessException(
+            'mklink',
+            ['/J', link.path, archDir.path],
+            '${result.stdout}${result.stderr}'.trim(),
+            result.exitCode,
+          );
+        }
+      } else {
+        link.createSync(archDir.path);
+      }
+    } catch (e) {
+      logger.warning(
+        "Could not link '${link.path}': $e. "
+        'The toolchain stays usable at ${archDir.path}.',
+      );
+      return false;
+    }
     return true;
   }
 
@@ -281,8 +310,4 @@ class UfbtToolchainDeployer {
 
   static bool _linkExists(Link link) => link.existsSync();
 
-  static String _uname(String flag) {
-    final result = Process.runSync('uname', [flag]);
-    return (result.stdout as String).trim();
-  }
 }

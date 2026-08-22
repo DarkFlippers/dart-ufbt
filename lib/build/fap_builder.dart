@@ -80,16 +80,14 @@ class FapBuilder {
       Directory(UfbtPaths.join(_sdkDir.path, _components[key] as String));
 
   String _tool(String name) {
-    final path = UfbtPaths.join(
-      paths.toolchainDir.path,
-      'current',
-      'bin${Platform.pathSeparator}arm-none-eabi-$name',
-    );
-    final file = File(Platform.isWindows ? '$path.exe' : path);
-    if (!file.existsSync()) {
-      throw FapEnvironmentException('Toolchain binary not found: ${file.path}');
+    final binary = 'arm-none-eabi-$name${Platform.isWindows ? '.exe' : ''}';
+    for (final root in paths.toolchainRoots) {
+      final file = File(UfbtPaths.join(root.path, 'bin', binary));
+      if (file.existsSync()) return file.path;
     }
-    return file.path;
+    throw FapEnvironmentException(
+      'Toolchain binary not found: $binary in ${paths.toolchainDir.path}',
+    );
   }
 
   Future<FapBuildResult> build({

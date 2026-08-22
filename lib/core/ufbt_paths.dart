@@ -7,6 +7,7 @@ class UfbtPaths {
 
   static const String stateFileName = 'ufbt_state.json';
   static const String toolchainSubdir = 'toolchain';
+  static const String currentLinkName = 'current';
   static const String envFileName = '.env';
 
   final Directory stateDir;
@@ -69,7 +70,32 @@ class UfbtPaths {
 
   Directory toolchainArchDir(String archDir) => _sub(toolchainDir, archDir);
 
-  Link get toolchainCurrentLink => Link(join(toolchainDir.path, 'current'));
+  Directory get toolchainCurrentDir => _sub(toolchainDir, currentLinkName);
+
+  Link get toolchainCurrentLink =>
+      Link(join(toolchainDir.path, currentLinkName));
+
+  /// Where a deployed toolchain can be reached, in the order fbtenv looks:
+  /// fbtenv.cmd points straight at the arch dir, fbtenv.sh goes through the
+  /// 'current' link.
+  List<Directory> get toolchainRoots {
+    final arch = toolchainArchDir(hostArchDir);
+    return Platform.isWindows
+        ? [arch, toolchainCurrentDir]
+        : [toolchainCurrentDir, arch];
+  }
+
+  static String get hostArchDir {
+    if (Platform.isWindows) return 'x86_64-windows';
+    final arch = _uname('-m');
+    final sys = _uname('-s').toLowerCase();
+    return '$arch-$sys';
+  }
+
+  static String _uname(String flag) {
+    final result = Process.runSync('uname', [flag]);
+    return (result.stdout as String).trim();
+  }
 
   static Directory _sub(Directory parent, String name) =>
       Directory(join(parent.path, name));
