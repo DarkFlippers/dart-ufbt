@@ -135,6 +135,35 @@ class FapBuilder {
     return results;
   }
 
+  Future<List<FapBuildResult>> buildOne({
+    required Directory appDir,
+    required String appid,
+    Directory? outputDir,
+  }) async {
+    final apps = FlipperApplication.loadManifest(appDir);
+    final app = apps.where((a) => a.appid == appid).firstOrNull;
+    if (app == null) {
+      throw FapBuildException('No app "$appid" in manifest');
+    }
+    final out = outputDir ?? Directory('${appDir.path}/dist');
+    final embedded = apps.where(
+      (plugin) => _isEmbeddedPlugin(plugin) && plugin.requires.contains(appid),
+    );
+    final results = <FapBuildResult>[];
+    for (final item in [...embedded, app]) {
+      try {
+        results.add(await _buildApp(item, out, apps));
+      } on FapEnvironmentException {
+        rethrow;
+      } on FapBuildException catch (e) {
+        logger.error('$e');
+        results.add(FapBuildResult(success: false, app: item, error: '$e'));
+        break;
+      }
+    }
+    return results;
+  }
+
   static bool _isEmbeddedPlugin(FlipperApplication app) =>
       app.apptype == FlipperAppType.plugin && app.falEmbedded;
 
