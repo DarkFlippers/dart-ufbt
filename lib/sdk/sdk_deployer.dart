@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:archive/archive_io.dart';
 
+import '../core/directory_swap.dart';
 import '../core/ufbt_paths.dart';
 import '../core/ufbt_state.dart';
 import '../log/logger.dart';
@@ -100,16 +101,25 @@ class UfbtSdkDeployer {
       return false;
     }
 
-    if (sdkTargetDir.existsSync()) {
-      sdkTargetDir.deleteSync(recursive: true);
-    }
+    DirectorySwap.recoverInterrupted(sdkTargetDir, onWarning: logger.error);
 
     final state = UfbtState({'hw_target': task.hwTarget, ...loader.metadata});
 
     logger.info('Deploying SDK');
-    await _extractZip(sdkComponent, sdkTargetDir);
+    // Built beside the installed SDK rather than over it, so a download that
+    // unpacks badly costs nothing: what is there keeps working until there is
+    // a complete replacement to put in its place.
+    final incoming = DirectorySwap.staging(sdkTargetDir);
+    if (incoming.existsSync()) incoming.deleteSync(recursive: true);
+    await _extractZip(sdkComponent, incoming);
 
-    state.write(paths.stateFile);
+    // Into the staging tree, because the state file lives inside the SDK
+    // directory. Writing it there means the swap commits the SDK and the
+    // state that describes it in one move - where before, dying between the
+    // extract and the write left an SDK whose missing state file deploy()
+    // then threw on.
+    state.write(File(UfbtPaths.join(incoming.path, UfbtPaths.stateFileName)));
+    DirectorySwap.swapIn(sdkTargetDir, incoming, onWarning: logger.error);
     logger.info('SDK deployed.');
     return true;
   }

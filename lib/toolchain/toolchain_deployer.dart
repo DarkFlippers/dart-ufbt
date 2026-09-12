@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:archive/archive_io.dart';
 
+import '../core/directory_swap.dart';
 import '../core/ufbt_paths.dart';
 import '../log/logger.dart';
 import '../net/file_fetcher.dart';
@@ -118,9 +119,7 @@ class UfbtToolchainDeployer {
     }
 
     final archDir = Directory(info.archDir);
-    logger.raw('Removing old toolchain..', newline: false);
-    if (archDir.existsSync()) archDir.deleteSync(recursive: true);
-    logger.raw('done');
+    DirectorySwap.recoverInterrupted(archDir, onWarning: logger.error);
 
     logger.raw("Unpacking toolchain to '${paths.toolchainDir.path}':");
     final currentLink = paths.toolchainCurrentLink;
@@ -133,7 +132,10 @@ class UfbtToolchainDeployer {
       UfbtPaths.join(paths.toolchainDir.path, distDirName),
     );
     if (!distDir.existsSync()) return false;
-    distDir.renameSync(archDir.path);
+    // Swapped in rather than renamed over a hole left earlier: the installed
+    // toolchain stays whole until the unpack has produced a complete one, so
+    // an unpack that fails no longer costs a toolchain that was working.
+    DirectorySwap.swapIn(archDir, distDir, onWarning: logger.error);
 
     logger.raw("linking toolchain to 'current'..", newline: false);
     logger.raw(await _linkCurrent(archDir) ? 'done' : 'skipped');
@@ -149,11 +151,7 @@ class UfbtToolchainDeployer {
     final archDir = Directory(info.archDir);
     final currentLink = paths.toolchainCurrentLink;
 
-    if (archDir.existsSync()) {
-      logger.raw('Removing old Windows toolchain..', newline: false);
-      archDir.deleteSync(recursive: true);
-      logger.raw('done!');
-    }
+    DirectorySwap.recoverInterrupted(archDir, onWarning: logger.error);
 
     if (_linkExists(currentLink)) {
       logger.raw("Unlinking 'current'..", newline: false);
@@ -186,7 +184,10 @@ class UfbtToolchainDeployer {
 
     logger.raw('moving..', newline: false);
     if (!distDir.existsSync()) return false;
-    distDir.renameSync(archDir.path);
+    // Swapped in at the end rather than moved into a hole cleared before the
+    // download: an installed toolchain now survives a download or an unpack
+    // that fails.
+    DirectorySwap.swapIn(archDir, distDir, onWarning: logger.error);
 
     logger.raw("linking to 'current'..", newline: false);
     logger.raw(await _linkCurrent(archDir) ? 'done!' : 'skipped');
