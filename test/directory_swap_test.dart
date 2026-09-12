@@ -161,4 +161,76 @@ void main() {
       expect(target.existsSync(), isFalse);
     });
   });
+
+  group('removing everything beside a tree', () {
+    // Sidecars first, target last. The other order leaves the target absent
+    // beside a set-aside tree, which is what an interrupted swap looks like -
+    // so the next deploy's recovery would hand back what was just removed.
+    test('takes the staging and set-aside trees with it', () {
+      treeAt(target, 'installed');
+      treeAt(incoming, 'half extracted');
+      treeAt(Directory('${target.path}.superseded.1000'), 'previous');
+
+      DirectorySwap.removeAll(target);
+
+      expect(target.existsSync(), isFalse);
+      expect(incoming.existsSync(), isFalse);
+      expect(superseded(), isEmpty);
+    });
+
+    test('what it removed cannot be restored by the next recovery', () {
+      treeAt(target, 'installed');
+      treeAt(Directory('${target.path}.superseded.1000'), 'previous');
+
+      DirectorySwap.removeAll(target);
+      DirectorySwap.recoverInterrupted(target);
+
+      expect(target.existsSync(), isFalse, reason: 'the removal stays done');
+    });
+
+    test('is safe when there is nothing to remove', () {
+      DirectorySwap.removeAll(target);
+
+      expect(target.existsSync(), isFalse);
+    });
+  });
+
+  // Both toolchain deploys hand swapIn a tree they unpacked under its own
+  // name, not one that staging() chose - and on Windows it arrives from a
+  // different directory entirely.
+  group('an incoming tree that came from elsewhere', () {
+    test('a tree from another directory swaps in', () {
+      treeAt(target, 'old toolchain');
+      final elsewhere = treeAt(
+        Directory('${base.path}${sep}downloads${sep}gcc-arm-none-eabi'),
+        'new toolchain',
+      );
+
+      DirectorySwap.swapIn(target, elsewhere);
+
+      expect(markerIn(target), 'new toolchain');
+      expect(elsewhere.existsSync(), isFalse);
+    });
+
+    // The safety net itself: a rollback that logs and leaves the tree aside
+    // has to be picked up by the next recovery rather than stranded.
+    test('a tree left aside by a failed swap is recovered next run', () {
+      treeAt(target, 'installed');
+      final warnings = <String>[];
+
+      // No incoming at all, so the second rename fails after the first moved
+      // the installed tree aside.
+      expect(
+        () => DirectorySwap.swapIn(target, incoming, onWarning: warnings.add),
+        throwsA(isA<FileSystemException>()),
+      );
+      expect(markerIn(target), 'installed', reason: 'rolled back on the spot');
+
+      // And if even that had not landed, the next run still finds it.
+      target.renameSync('${target.path}.superseded.3000');
+      DirectorySwap.recoverInterrupted(target);
+
+      expect(markerIn(target), 'installed');
+    });
+  });
 }

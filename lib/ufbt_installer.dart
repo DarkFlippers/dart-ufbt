@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'core/directory_swap.dart';
 import 'core/ufbt_paths.dart';
 import 'core/ufbt_state.dart';
 import 'log/logger.dart';
@@ -159,7 +160,12 @@ class UfbtInstaller {
       _remove(paths.downloadDir);
     } else {
       logger.info('Cleaning SDK state in ${paths.currentSdkDir.path}');
-      _remove(paths.currentSdkDir);
+      // Takes the staging and set-aside trees with it. Removing only the SDK
+      // would leave one of those standing beside an absent target, which the
+      // next deploy's recovery reads as an interrupted swap and restores -
+      // handing back the SDK that was just deleted, still occupying the disk
+      // the user was trying to reclaim.
+      DirectorySwap.removeAll(paths.currentSdkDir);
     }
     logger.info('Done');
     return true;

@@ -79,6 +79,24 @@ class DirectorySwap {
     }
   }
 
+  /// Removes [target] along with anything staged or set aside beside it.
+  ///
+  /// Sidecars first and the target last, which is not interchangeable: the
+  /// other order leaves the target absent while an aside tree still stands,
+  /// and that is exactly the state [recoverInterrupted] reads as an
+  /// interrupted swap. A removal stopped part way through would then be undone
+  /// by the next deploy, handing back what the user asked to be rid of.
+  static void removeAll(Directory target) {
+    for (final tree in [staging(target), ..._supersededTrees(target), target]) {
+      if (!tree.existsSync()) continue;
+      try {
+        tree.deleteSync(recursive: true);
+      } on PathNotFoundException {
+        continue;
+      }
+    }
+  }
+
   /// Repairs whatever a process that died mid-swap left beside [target].
   ///
   /// Call before starting a deploy, and before trusting that [target] being

@@ -23,6 +23,13 @@ class UfbtSdkDeployer {
   final UfbtFileFetcher fetcher;
 
   SdkDeployTask? previousTask() {
+    // Before trusting that a missing state file means nothing is installed:
+    // between the swap's two renames the SDK, and the state file inside it,
+    // are sitting under a set-aside name.
+    DirectorySwap.recoverInterrupted(
+      paths.currentSdkDir,
+      onWarning: logger.warning,
+    );
     if (!paths.stateFile.existsSync()) return null;
     final state = UfbtState.read(paths.stateFile)!;
     logger.debug('get_previous_task() loaded state: ${state.values}');
@@ -76,6 +83,10 @@ class UfbtSdkDeployer {
     final sdkTargetDir = paths.currentSdkDir;
     logger.info('uFBT SDK dir: ${sdkTargetDir.path}');
 
+    // Ahead of the up-to-date check below, which reads the SDK's absence as
+    // "nothing installed" - and an interrupted swap looks exactly like that.
+    DirectorySwap.recoverInterrupted(sdkTargetDir, onWarning: logger.warning);
+
     if (!task.force && sdkTargetDir.existsSync()) {
       final state = UfbtState.read(paths.stateFile);
       if (state == null) {
@@ -101,8 +112,6 @@ class UfbtSdkDeployer {
       return false;
     }
 
-    DirectorySwap.recoverInterrupted(sdkTargetDir, onWarning: logger.error);
-
     final state = UfbtState({'hw_target': task.hwTarget, ...loader.metadata});
 
     logger.info('Deploying SDK');
@@ -119,7 +128,7 @@ class UfbtSdkDeployer {
     // extract and the write left an SDK whose missing state file deploy()
     // then threw on.
     state.write(File(UfbtPaths.join(incoming.path, UfbtPaths.stateFileName)));
-    DirectorySwap.swapIn(sdkTargetDir, incoming, onWarning: logger.error);
+    DirectorySwap.swapIn(sdkTargetDir, incoming, onWarning: logger.warning);
     logger.info('SDK deployed.');
     return true;
   }

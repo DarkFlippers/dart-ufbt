@@ -119,12 +119,9 @@ class UfbtToolchainDeployer {
     }
 
     final archDir = Directory(info.archDir);
-    DirectorySwap.recoverInterrupted(archDir, onWarning: logger.error);
+    DirectorySwap.recoverInterrupted(archDir, onWarning: logger.warning);
 
     logger.raw("Unpacking toolchain to '${paths.toolchainDir.path}':");
-    final currentLink = paths.toolchainCurrentLink;
-    if (_linkExists(currentLink)) currentLink.deleteSync();
-
     paths.toolchainDir.createSync(recursive: true);
     if (!await _unpackTar(archiveFile)) return false;
 
@@ -132,10 +129,27 @@ class UfbtToolchainDeployer {
       UfbtPaths.join(paths.toolchainDir.path, distDirName),
     );
     if (!distDir.existsSync()) return false;
-    // Swapped in rather than renamed over a hole left earlier: the installed
+    // Renamed onto the staging name before the swap, so that a run which dies
+    // here leaves something recoverInterrupted sweeps. Left under its own
+    // name, an unpacked tree of ~1GB is orphaned for good - and since the dist
+    // name carries no version, the next unpack would tar into it and merge the
+    // previous toolchain's binaries into the new one.
+    final staging = DirectorySwap.staging(archDir);
+    if (staging.existsSync()) staging.deleteSync(recursive: true);
+    distDir.renameSync(staging.path);
+
+    // Swapped in rather than moved into a hole cleared earlier: the installed
     // toolchain stays whole until the unpack has produced a complete one, so
     // an unpack that fails no longer costs a toolchain that was working.
-    DirectorySwap.swapIn(archDir, distDir, onWarning: logger.error);
+    DirectorySwap.swapIn(archDir, staging, onWarning: logger.warning);
+
+    // Unlinked here, not before the unpack. While the tree was deleted up
+    // front, a failure in between left nothing for the link to point at; now
+    // the tree survives, so dropping the link early would leave a toolchain
+    // that status() reports as installed with nothing linking to it, and the
+    // up-to-date early return would never repair it.
+    final currentLink = paths.toolchainCurrentLink;
+    if (_linkExists(currentLink)) currentLink.deleteSync();
 
     logger.raw("linking toolchain to 'current'..", newline: false);
     logger.raw(await _linkCurrent(archDir) ? 'done' : 'skipped');
@@ -149,15 +163,7 @@ class UfbtToolchainDeployer {
     final distDirName = archiveName.replaceAll('-${info.version}.zip', '');
     final archiveFile = File(UfbtPaths.join(_archiveDir.path, archiveName));
     final archDir = Directory(info.archDir);
-    final currentLink = paths.toolchainCurrentLink;
-
-    DirectorySwap.recoverInterrupted(archDir, onWarning: logger.error);
-
-    if (_linkExists(currentLink)) {
-      logger.raw("Unlinking 'current'..", newline: false);
-      currentLink.deleteSync();
-      logger.raw('done!');
-    }
+    DirectorySwap.recoverInterrupted(archDir, onWarning: logger.warning);
 
     if (!archiveFile.existsSync()) {
       logger.raw('Downloading Windows toolchain..', newline: false);
@@ -184,10 +190,25 @@ class UfbtToolchainDeployer {
 
     logger.raw('moving..', newline: false);
     if (!distDir.existsSync()) return false;
+    // Onto the staging name first, so an interrupted run leaves something
+    // recoverInterrupted knows to sweep. It also brings the tree alongside the
+    // toolchain before the swap, since the unpack lands it under the SDK
+    // directory rather than beside its destination.
+    final staging = DirectorySwap.staging(archDir);
+    if (staging.existsSync()) staging.deleteSync(recursive: true);
+    distDir.renameSync(staging.path);
+
     // Swapped in at the end rather than moved into a hole cleared before the
     // download: an installed toolchain now survives a download or an unpack
     // that fails.
-    DirectorySwap.swapIn(archDir, distDir, onWarning: logger.error);
+    DirectorySwap.swapIn(archDir, staging, onWarning: logger.warning);
+
+    final currentLink = paths.toolchainCurrentLink;
+    if (_linkExists(currentLink)) {
+      logger.raw("Unlinking 'current'..", newline: false);
+      currentLink.deleteSync();
+      logger.raw('done!');
+    }
 
     logger.raw("linking to 'current'..", newline: false);
     logger.raw(await _linkCurrent(archDir) ? 'done!' : 'skipped');
@@ -310,5 +331,4 @@ class UfbtToolchainDeployer {
   }
 
   static bool _linkExists(Link link) => link.existsSync();
-
 }
