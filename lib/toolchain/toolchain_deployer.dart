@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:archive/archive_io.dart';
 
+import '../core/directory_swap.dart';
 import '../core/ufbt_paths.dart';
 import '../log/logger.dart';
 import '../net/file_fetcher.dart';
@@ -118,14 +119,9 @@ class UfbtToolchainDeployer {
     }
 
     final archDir = Directory(info.archDir);
-    logger.raw('Removing old toolchain..', newline: false);
-    if (archDir.existsSync()) archDir.deleteSync(recursive: true);
-    logger.raw('done');
+    DirectorySwap.recoverInterrupted(archDir, onWarning: logger.warning);
 
     logger.raw("Unpacking toolchain to '${paths.toolchainDir.path}':");
-    final currentLink = paths.toolchainCurrentLink;
-    if (_linkExists(currentLink)) currentLink.deleteSync();
-
     paths.toolchainDir.createSync(recursive: true);
     if (!await _unpackTar(archiveFile)) return false;
 
@@ -133,7 +129,27 @@ class UfbtToolchainDeployer {
       UfbtPaths.join(paths.toolchainDir.path, distDirName),
     );
     if (!distDir.existsSync()) return false;
-    distDir.renameSync(archDir.path);
+    // Renamed onto the staging name before the swap, so that a run which dies
+    // here leaves something recoverInterrupted sweeps. Left under its own
+    // name, an unpacked tree of ~1GB is orphaned for good - and since the dist
+    // name carries no version, the next unpack would tar into it and merge the
+    // previous toolchain's binaries into the new one.
+    final staging = DirectorySwap.staging(archDir);
+    if (staging.existsSync()) await staging.delete(recursive: true);
+    distDir.renameSync(staging.path);
+
+    // Swapped in rather than moved into a hole cleared earlier: the installed
+    // toolchain stays whole until the unpack has produced a complete one, so
+    // an unpack that fails no longer costs a toolchain that was working.
+    await DirectorySwap.swapIn(archDir, staging, onWarning: logger.warning);
+
+    // Unlinked here, not before the unpack. While the tree was deleted up
+    // front, a failure in between left nothing for the link to point at; now
+    // the tree survives, so dropping the link early would leave a toolchain
+    // that status() reports as installed with nothing linking to it, and the
+    // up-to-date early return would never repair it.
+    final currentLink = paths.toolchainCurrentLink;
+    if (_linkExists(currentLink)) currentLink.deleteSync();
 
     logger.raw("linking toolchain to 'current'..", newline: false);
     logger.raw(await _linkCurrent(archDir) ? 'done' : 'skipped');
@@ -147,19 +163,7 @@ class UfbtToolchainDeployer {
     final distDirName = archiveName.replaceAll('-${info.version}.zip', '');
     final archiveFile = File(UfbtPaths.join(_archiveDir.path, archiveName));
     final archDir = Directory(info.archDir);
-    final currentLink = paths.toolchainCurrentLink;
-
-    if (archDir.existsSync()) {
-      logger.raw('Removing old Windows toolchain..', newline: false);
-      archDir.deleteSync(recursive: true);
-      logger.raw('done!');
-    }
-
-    if (_linkExists(currentLink)) {
-      logger.raw("Unlinking 'current'..", newline: false);
-      currentLink.deleteSync();
-      logger.raw('done!');
-    }
+    DirectorySwap.recoverInterrupted(archDir, onWarning: logger.warning);
 
     if (!archiveFile.existsSync()) {
       logger.raw('Downloading Windows toolchain..', newline: false);
@@ -178,7 +182,7 @@ class UfbtToolchainDeployer {
     final distDir = Directory(UfbtPaths.join(_archiveDir.path, distDirName));
     if (distDir.existsSync()) {
       logger.raw('Cleaning up temp toolchain path..');
-      distDir.deleteSync(recursive: true);
+      await distDir.delete(recursive: true);
     }
 
     logger.raw('Extracting Windows toolchain..', newline: false);
@@ -186,7 +190,25 @@ class UfbtToolchainDeployer {
 
     logger.raw('moving..', newline: false);
     if (!distDir.existsSync()) return false;
-    distDir.renameSync(archDir.path);
+    // Onto the staging name first, so an interrupted run leaves something
+    // recoverInterrupted knows to sweep. It also brings the tree alongside the
+    // toolchain before the swap, since the unpack lands it under the SDK
+    // directory rather than beside its destination.
+    final staging = DirectorySwap.staging(archDir);
+    if (staging.existsSync()) await staging.delete(recursive: true);
+    distDir.renameSync(staging.path);
+
+    // Swapped in at the end rather than moved into a hole cleared before the
+    // download: an installed toolchain now survives a download or an unpack
+    // that fails.
+    await DirectorySwap.swapIn(archDir, staging, onWarning: logger.warning);
+
+    final currentLink = paths.toolchainCurrentLink;
+    if (_linkExists(currentLink)) {
+      logger.raw("Unlinking 'current'..", newline: false);
+      currentLink.deleteSync();
+      logger.raw('done!');
+    }
 
     logger.raw("linking to 'current'..", newline: false);
     logger.raw(await _linkCurrent(archDir) ? 'done!' : 'skipped');
@@ -309,5 +331,4 @@ class UfbtToolchainDeployer {
   }
 
   static bool _linkExists(Link link) => link.existsSync();
-
 }

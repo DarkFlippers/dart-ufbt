@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    # The deploy path renames directories onto one another, and that is where
+    # the platforms differ: Windows refuses any existing destination, POSIX
+    # takes only an empty one. Both have to be exercised for the tests to mean
+    # anything.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - run: dart pub get
+
+      - name: Check formatting
+        run: dart format --output=none --set-exit-if-changed .
+        if: matrix.os == 'ubuntu-latest'
+
+      - run: dart analyze --fatal-infos
+
+      - run: dart test
