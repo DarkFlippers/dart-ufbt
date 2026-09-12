@@ -39,21 +39,21 @@ void main() {
       .toList();
 
   group('swapping a new tree in', () {
-    test('the new tree replaces the old one', () {
+    test('the new tree replaces the old one', () async {
       treeAt(target, 'old sdk');
       treeAt(incoming, 'new sdk');
 
-      DirectorySwap.swapIn(target, incoming);
+      await DirectorySwap.swapIn(target, incoming);
 
       expect(markerIn(target), 'new sdk');
       expect(incoming.existsSync(), isFalse);
       expect(superseded(), isEmpty, reason: 'the replaced tree is removed');
     });
 
-    test('works when nothing was installed', () {
+    test('works when nothing was installed', () async {
       treeAt(incoming, 'new sdk');
 
-      DirectorySwap.swapIn(target, incoming);
+      await DirectorySwap.swapIn(target, incoming);
 
       expect(markerIn(target), 'new sdk');
     });
@@ -61,7 +61,7 @@ void main() {
     // The wedge the shared name caused: the tree being deleted and the
     // destination of the next swap were the same path, so a delete that
     // stopped part way through blocked every later deploy.
-    test('a leftover at the old shared name does not block the swap', () {
+    test('a leftover at the old shared name does not block the swap', () async {
       treeAt(target, 'old sdk');
       treeAt(incoming, 'new sdk');
       final stale = treeAt(
@@ -69,22 +69,25 @@ void main() {
         'wedged an earlier run',
       );
 
-      DirectorySwap.swapIn(target, incoming);
+      await DirectorySwap.swapIn(target, incoming);
 
       expect(markerIn(target), 'new sdk');
       expect(stale.existsSync(), isTrue, reason: 'swept later, not collided');
     });
 
-    test('the installed tree is put back if the new one cannot move in', () {
-      treeAt(target, 'old sdk');
+    test(
+      'the installed tree is put back if the new one cannot move in',
+      () async {
+        treeAt(target, 'old sdk');
 
-      expect(
-        () => DirectorySwap.swapIn(target, incoming),
-        throwsA(isA<FileSystemException>()),
-      );
+        await expectLater(
+          DirectorySwap.swapIn(target, incoming),
+          throwsA(isA<FileSystemException>()),
+        );
 
-      expect(markerIn(target), 'old sdk', reason: 'not left with nothing');
-    });
+        expect(markerIn(target), 'old sdk', reason: 'not left with nothing');
+      },
+    );
   });
 
   group('recovering an interrupted deploy', () {
@@ -199,14 +202,14 @@ void main() {
   // name, not one that staging() chose - and on Windows it arrives from a
   // different directory entirely.
   group('an incoming tree that came from elsewhere', () {
-    test('a tree from another directory swaps in', () {
+    test('a tree from another directory swaps in', () async {
       treeAt(target, 'old toolchain');
       final elsewhere = treeAt(
         Directory('${base.path}${sep}downloads${sep}gcc-arm-none-eabi'),
         'new toolchain',
       );
 
-      DirectorySwap.swapIn(target, elsewhere);
+      await DirectorySwap.swapIn(target, elsewhere);
 
       expect(markerIn(target), 'new toolchain');
       expect(elsewhere.existsSync(), isFalse);
@@ -214,14 +217,14 @@ void main() {
 
     // The safety net itself: a rollback that logs and leaves the tree aside
     // has to be picked up by the next recovery rather than stranded.
-    test('a tree left aside by a failed swap is recovered next run', () {
+    test('a tree left aside by a failed swap is recovered next run', () async {
       treeAt(target, 'installed');
       final warnings = <String>[];
 
       // No incoming at all, so the second rename fails after the first moved
       // the installed tree aside.
-      expect(
-        () => DirectorySwap.swapIn(target, incoming, onWarning: warnings.add),
+      await expectLater(
+        DirectorySwap.swapIn(target, incoming, onWarning: warnings.add),
         throwsA(isA<FileSystemException>()),
       );
       expect(markerIn(target), 'installed', reason: 'rolled back on the spot');

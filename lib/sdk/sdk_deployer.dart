@@ -119,7 +119,10 @@ class UfbtSdkDeployer {
     // unpacks badly costs nothing: what is there keeps working until there is
     // a complete replacement to put in its place.
     final incoming = DirectorySwap.staging(sdkTargetDir);
-    if (incoming.existsSync()) incoming.deleteSync(recursive: true);
+    // Awaited rather than deleteSync, like the swap below: a staging tree
+    // left by an interrupted run is a whole SDK, and this runs on the
+    // isolate drawing the progress the extract is about to report.
+    if (incoming.existsSync()) await incoming.delete(recursive: true);
     await _extractZip(sdkComponent, incoming);
 
     // Into the staging tree, because the state file lives inside the SDK
@@ -128,7 +131,11 @@ class UfbtSdkDeployer {
     // extract and the write left an SDK whose missing state file deploy()
     // then threw on.
     state.write(File(UfbtPaths.join(incoming.path, UfbtPaths.stateFileName)));
-    DirectorySwap.swapIn(sdkTargetDir, incoming, onWarning: logger.warning);
+    await DirectorySwap.swapIn(
+      sdkTargetDir,
+      incoming,
+      onWarning: logger.warning,
+    );
     logger.info('SDK deployed.');
     return true;
   }

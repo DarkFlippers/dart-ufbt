@@ -1,1 +1,9 @@
 include: package:lints/recommended.yaml
+
+linter:
+  rules:
+    # The deploy hands large trees to dart:io so the work lands on its thread
+    # pool instead of the isolate drawing the app. A dropped await puts it back
+    # on the critical path silently - the tests still pass, because a two-file
+    # tree finishes inside the turn that abandoned it.
+    - unawaited_futures

@@ -135,13 +135,13 @@ class UfbtToolchainDeployer {
     // name carries no version, the next unpack would tar into it and merge the
     // previous toolchain's binaries into the new one.
     final staging = DirectorySwap.staging(archDir);
-    if (staging.existsSync()) staging.deleteSync(recursive: true);
+    if (staging.existsSync()) await staging.delete(recursive: true);
     distDir.renameSync(staging.path);
 
     // Swapped in rather than moved into a hole cleared earlier: the installed
     // toolchain stays whole until the unpack has produced a complete one, so
     // an unpack that fails no longer costs a toolchain that was working.
-    DirectorySwap.swapIn(archDir, staging, onWarning: logger.warning);
+    await DirectorySwap.swapIn(archDir, staging, onWarning: logger.warning);
 
     // Unlinked here, not before the unpack. While the tree was deleted up
     // front, a failure in between left nothing for the link to point at; now
@@ -182,7 +182,7 @@ class UfbtToolchainDeployer {
     final distDir = Directory(UfbtPaths.join(_archiveDir.path, distDirName));
     if (distDir.existsSync()) {
       logger.raw('Cleaning up temp toolchain path..');
-      distDir.deleteSync(recursive: true);
+      await distDir.delete(recursive: true);
     }
 
     logger.raw('Extracting Windows toolchain..', newline: false);
@@ -195,13 +195,13 @@ class UfbtToolchainDeployer {
     // toolchain before the swap, since the unpack lands it under the SDK
     // directory rather than beside its destination.
     final staging = DirectorySwap.staging(archDir);
-    if (staging.existsSync()) staging.deleteSync(recursive: true);
+    if (staging.existsSync()) await staging.delete(recursive: true);
     distDir.renameSync(staging.path);
 
     // Swapped in at the end rather than moved into a hole cleared before the
     // download: an installed toolchain now survives a download or an unpack
     // that fails.
-    DirectorySwap.swapIn(archDir, staging, onWarning: logger.warning);
+    await DirectorySwap.swapIn(archDir, staging, onWarning: logger.warning);
 
     final currentLink = paths.toolchainCurrentLink;
     if (_linkExists(currentLink)) {

@@ -9,7 +9,14 @@ import 'dart:io';
 /// download to get back to where they started.
 ///
 /// So the new tree is built beside the target and moved into place at the end.
-/// Everything here is synchronous, matching the deployers around it.
+///
+/// The renames stay synchronous: they are metadata operations, and the window
+/// between them is the one state that loses data, so nothing else gets to run
+/// inside it. Removing what a swap replaced is the opposite case — hundreds of
+/// megabytes of small files, on the isolate that draws the app, at the moment
+/// the deploy would otherwise be finished. That one is awaited, so dart:io
+/// runs it on its own thread pool and the UI stays live, the way the extract
+/// feeding it already yields between entries.
 class DirectorySwap {
   /// Where a replacement is assembled before it is committed.
   static const String incomingSuffix = '.incoming';
@@ -43,11 +50,11 @@ class DirectorySwap {
   /// metadata operations wide, and it is the one state that loses data, so a
   /// failed second rename puts the old tree back and [recoverInterrupted]
   /// repairs a process that died inside it.
-  static void swapIn(
+  static Future<void> swapIn(
     Directory target,
     Directory incoming, {
     void Function(String message)? onWarning,
-  }) {
+  }) async {
     final superseded = Directory(
       '${target.path}$supersededPrefix'
       '.${DateTime.now().microsecondsSinceEpoch}',
@@ -59,18 +66,14 @@ class DirectorySwap {
       incoming.renameSync(target.path);
     } catch (_) {
       if (replacing && !target.existsSync()) {
-        try {
-          superseded.renameSync(target.path);
-        } catch (e) {
-          onWarning?.call('could not put ${target.path} back: $e');
-        }
+        _restore(target, superseded, onWarning);
       }
       rethrow;
     }
 
     if (!replacing) return;
     try {
-      superseded.deleteSync(recursive: true);
+      await superseded.delete(recursive: true);
     } on FileSystemException catch (e) {
       // Costs disk, not correctness. The tree is named for this swap, so a
       // leftover is something the next recovery sweeps up rather than
@@ -109,21 +112,21 @@ class DirectorySwap {
     // anything older is a delete that never finished.
     final aside = _supersededTrees(target);
 
+    // A tree that will not go back holds the only copy there is, which is the
+    // whole reason the restore was being attempted. Leaving it costs disk and
+    // the next run tries again; removing it is the one thing this must never
+    // do — and a failed recursive delete is not a no-op either, since one
+    // locked file stops it having already removed what it reached first.
     Directory? keep;
     if (!target.existsSync() && aside.isNotEmpty) {
-      try {
-        aside.first.renameSync(target.path);
-      } catch (e) {
-        // It holds the only copy there is, which is the whole reason the
-        // restore was being attempted. Leaving it costs disk and the next run
-        // tries again; removing it is the one thing this must never do — and a
-        // failed recursive delete is not a no-op either, since one locked file
-        // stops it having already removed what it reached first.
-        keep = aside.first;
-        onWarning?.call('could not put ${target.path} back: $e');
-      }
+      if (!_restore(target, aside.first, onWarning)) keep = aside.first;
     }
 
+    // Synchronous, where the swap's delete is not: this runs immediately
+    // before a deploy that renames onto the staging path, so the staging tree
+    // has to be gone by the time this returns. Only a crash leaves anything
+    // here, so it is not a cost a working install pays.
+    //
     // A restore consumes the tree it moved, so that one is already gone.
     for (final leftover in [staging(target), ...aside]) {
       if (leftover.path == keep?.path || !leftover.existsSync()) continue;
@@ -132,6 +135,22 @@ class DirectorySwap {
       } on FileSystemException catch (e) {
         onWarning?.call('could not remove ${leftover.path}: $e');
       }
+    }
+  }
+
+  /// Moves [from] back to [target], reporting rather than throwing when it
+  /// will not go. Says whether the tree landed.
+  static bool _restore(
+    Directory target,
+    Directory from,
+    void Function(String message)? onWarning,
+  ) {
+    try {
+      from.renameSync(target.path);
+      return true;
+    } catch (e) {
+      onWarning?.call('could not put ${target.path} back: $e');
+      return false;
     }
   }
 
