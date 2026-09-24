@@ -15,15 +15,27 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
+        sdk: ["3.13.1"]
+        include:
+          # The next Dart release, before it is anyone's problem. One job on
+          # one OS: the matrix above exists for directory-rename behaviour,
+          # which does not change with the SDK.
+          - os: ubuntu-latest
+            sdk: stable
+            canary: true
 
     runs-on: ${{ matrix.os }}
+    # A red canary means the SDK moved, not that this pull request is wrong.
+    # It reports; it does not hold the branch.
+    continue-on-error: ${{ matrix.canary || false }}
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: dart-lang/setup-dart@v1
         with:
-          sdk: stable
+          # Pinned to the floor pubspec declares, except in the canary job.
+          sdk: ${{ matrix.sdk }}
 
       - run: dart pub get
 
