@@ -11,7 +11,10 @@ platforms:
   windows:
 
 environment:
-  sdk: ^3.11.1
+  # What this package is actually verified on - see CI, which pins no version
+  # and so resolves to current stable. Declaring a lower floor promises a
+  # window nobody has built in.
+  sdk: ^3.13.1
 
 dependencies:
   archive: ^4.0.0
