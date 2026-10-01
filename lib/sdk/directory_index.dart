@@ -1,5 +1,21 @@
 import 'file_type.dart';
 
+/// The text in [raw], or null when there is none to have.
+///
+/// A cast would read a field that changed type as a decode failure for the
+/// whole document - and this decoder reads `directory.json`, where losing the
+/// document loses every channel. The producer is not this project's to pin:
+/// the same feed is read by two decoders in two repositories, and the other
+/// one already answers absence and a type change the same way.
+String? _text(Object? raw) => raw is String ? raw : null;
+
+/// The whole number in [raw], or null when there is none to have.
+///
+/// `timestamp` arrives as an int from both live feeds today, so `as int?`
+/// works - and a producer that ever emits `1788532004.0` decodes to double
+/// and takes every channel with it. A number is a number.
+int? _count(Object? raw) => raw is num ? raw.toInt() : null;
+
 class UfbtIndexFile {
   const UfbtIndexFile({
     required this.url,
@@ -15,10 +31,10 @@ class UfbtIndexFile {
 
   static UfbtIndexFile fromJson(Map<String, dynamic> json) {
     return UfbtIndexFile(
-      url: json['url'] as String? ?? '',
-      target: json['target'] as String? ?? '',
-      type: json['type'] as String? ?? '',
-      sha256: json['sha256'] as String?,
+      url: _text(json['url']) ?? '',
+      target: _text(json['target']) ?? '',
+      type: _text(json['type']) ?? '',
+      sha256: _text(json['sha256']),
     );
   }
 }
@@ -39,9 +55,9 @@ class UfbtIndexVersion {
   static UfbtIndexVersion fromJson(Map<String, dynamic> json) {
     final files = (json['files'] as List?) ?? const [];
     return UfbtIndexVersion(
-      version: json['version'] as String? ?? '',
-      changelog: json['changelog'] as String?,
-      timestamp: json['timestamp'] as int?,
+      version: _text(json['version']) ?? '',
+      changelog: _text(json['changelog']),
+      timestamp: _count(json['timestamp']),
       files: files
           .whereType<Map>()
           .map(
@@ -75,9 +91,9 @@ class UfbtIndexChannel {
   static UfbtIndexChannel fromJson(Map<String, dynamic> json) {
     final versions = (json['versions'] as List?) ?? const [];
     return UfbtIndexChannel(
-      id: json['id'] as String? ?? '',
-      title: json['title'] as String?,
-      description: json['description'] as String?,
+      id: _text(json['id']) ?? '',
+      title: _text(json['title']),
+      description: _text(json['description']),
       versions: versions
           .whereType<Map>()
           .map(
