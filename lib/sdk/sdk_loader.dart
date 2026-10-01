@@ -164,15 +164,23 @@ class UpdateChannelSdkLoader extends UfbtSdkLoader {
   Future<void> load() async {
     logger.info('Fetching version info for $_channelRepr from $jsonIndexUrl');
 
-    final Map<String, dynamic> raw;
+    final UfbtDirectoryIndex index;
     try {
       final body = await fetcher.readAsString(jsonIndexUrl);
-      raw = Map<String, dynamic>.from(jsonDecode(body) as Map);
+      final raw = Map<String, dynamic>.from(jsonDecode(body) as Map);
+      // Inside the guard, not after it. The decoder tolerates a field that
+      // changed type now, but it is the only thing standing between this
+      // document and a TypeError - and one that escaped here left `load()`
+      // throwing something no caller of this package is told to expect.
+      index = UfbtDirectoryIndex.fromJson(raw);
     } on FormatException catch (e) {
       throw UfbtValueError('Invalid JSON: ${e.message}');
+    } on TypeError catch (e) {
+      // The shape of the document, rather than its syntax: a `channels` that
+      // is an object, or a top level that is a list.
+      throw UfbtValueError('Unexpected JSON shape: $e');
     }
 
-    final index = UfbtDirectoryIndex.fromJson(raw);
     if (index.channels.isEmpty) {
       throw UfbtValueError('Invalid channel: $_channelRepr');
     }
