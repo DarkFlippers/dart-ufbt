@@ -63,6 +63,9 @@ class FapBuilder {
   static const String metaSection = '.fapmeta';
   static const String fileAssetsSection = '.fapassets';
 
+  static List<String> manifestDefines(List<String> cdefines) =>
+      cdefines.map(SdkOpts.unquote).toList();
+
   Directory get _sdkDir => paths.currentSdkDir;
 
   Map<String, dynamic> get _components {
@@ -200,7 +203,7 @@ class FapBuilder {
     final includePaths = <String>[];
     final defines = <String>[
       'FAP_VERSION="${app.fapVersion.join('.')}"',
-      ...app.cdefines,
+      ...manifestDefines(app.cdefines),
     ];
 
     File? iconsSource;
@@ -414,7 +417,7 @@ class FapBuilder {
           workDir: workDir,
           opts: opts,
           includePaths: libIncludes,
-          defines: lib.cdefines,
+          defines: manifestDefines(lib.cdefines),
           extraFlags: lib.cflags,
         ),
       );

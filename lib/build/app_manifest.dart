@@ -141,13 +141,21 @@ class FlipperApplication {
   int get versionAsInt =>
       ((fapVersion[0] & 0xFFFF) << 16) | (fapVersion[1] & 0xFFFF);
 
-  static List<FlipperApplication> loadManifest(Directory appDir) {
+  static List<FlipperApplication> loadManifest(
+    Directory appDir, {
+    Map<String, String> environment = const {},
+  }) {
     final file = File('${appDir.path}${Platform.pathSeparator}$manifestName');
     if (!file.existsSync()) {
       throw FlipperManifestException('App manifest not found at ${file.path}');
     }
 
-    final calls = FamParser.parseCalls(file.readAsStringSync(), const {'App'});
+    final calls = FamParser.parseCalls(
+      file.readAsStringSync(),
+      const {'App'},
+      manifestPath: file.path,
+      environment: environment,
+    );
     if (calls.isEmpty) {
       throw FlipperManifestException('No App() found in ${file.path}');
     }

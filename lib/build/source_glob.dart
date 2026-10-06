@@ -44,6 +44,7 @@ class SourceGlob {
     if (!node.existsSync()) return results;
 
     for (final dir in _entries(node).whereType<Directory>()) {
+      if (_name(dir.path).startsWith('.')) continue;
       if (_isExcluded(dir.path, base, excluded)) continue;
       results.addAll(globRecursive(dir, pattern, exclude, root: base));
     }
@@ -131,6 +132,7 @@ class SourceGlob {
     String pattern, {
     bool crossSeparators = false,
   }) {
+    if (name.startsWith('.') && !pattern.startsWith('.')) return false;
     final any = crossSeparators ? '.*' : '[^/\\\\]*';
     final buffer = StringBuffer('^');
     for (var i = 0; i < pattern.length; i++) {
