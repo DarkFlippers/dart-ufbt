@@ -62,7 +62,7 @@ class FapBuilder {
 
   static const String metaSection = '.fapmeta';
   static const String fileAssetsSection = '.fapassets';
-  
+
   static List<String> manifestDefines(List<String> cdefines) =>
       cdefines.map(SdkOpts.unquote).toList();
 

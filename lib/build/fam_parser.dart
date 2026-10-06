@@ -313,7 +313,17 @@ class _Lexer {
       if (_pos >= _src.length) _fail(line, 'unterminated string literal');
       final c = _src[_pos];
       if (c == '\\') {
-        if (_pos + 1 < _src.length && _src[_pos + 1] == '\n') _line++;
+        final next = _pos + 1 < _src.length ? _src[_pos + 1] : '';
+        if (next == '\r') {
+          // A line continuation inside a literal, on a CRLF checkout: the
+          // newline is two characters, and stepping over one of them leaves
+          // _pos on the newline, where a single-quoted literal is then
+          // declared unterminated. _unescape drops the pair itself.
+          _pos += _pos + 2 < _src.length && _src[_pos + 2] == '\n' ? 3 : 2;
+          _line++;
+          continue;
+        }
+        if (next == '\n') _line++;
         _pos += 2;
         continue;
       }
@@ -406,6 +416,14 @@ String _unescape(String s) {
         if (code == null) {
           throw const FamParseException(
             'application.fam: truncated \\x/\\u escape in a string',
+          );
+        }
+        // int.tryParse accepts a sign the escape grammar does not, and a
+        // \U escape can name more than Unicode has: writeCharCode would
+        // throw a RangeError straight through parseCalls.
+        if (code < 0 || code > 0x10FFFF) {
+          throw const FamParseException(
+            'application.fam: \\x/\\u escape is not a Unicode code point',
           );
         }
         out.writeCharCode(code);
@@ -1433,8 +1451,11 @@ class _Tuple extends ListBase<Object?> {
       throw UnsupportedError('tuple is immutable');
 }
 
-typedef _Native =
-    Object? Function(List<Object?> args, Map<String, Object?> kwargs, int line);
+typedef _Native = Object? Function(
+  List<Object?> args,
+  Map<String, Object?> kwargs,
+  int line,
+);
 
 class _Builtin {
   const _Builtin(this.name, this.call, [this.instanceCheck]);
@@ -1491,11 +1512,15 @@ class _ErrorValue {
 }
 
 class _TextFile {
-  const _TextFile(this.text);
+  _TextFile(this.text);
 
   final String text;
 
-  List<String> get lines {
+  /// Split once: `for line in f` and a second `readlines()` both land
+  /// here, and the split was 326 us per access on a 190 KB file.
+  late final List<String> lines = _split();
+
+  List<String> _split() {
     final lines = <String>[];
     var start = 0;
     while (start < text.length) {
@@ -1538,6 +1563,22 @@ const _maxCallDepth = 200;
 
 const _maxRange = 1000000;
 
+/// Elements a single `*` repeat may produce. `_maxRange` bounds one loop;
+/// without this, `[0] * 1000 * 1000 * 1000` allocates until the process
+/// dies, and `_term` is left-associative so the bounds compose.
+const _maxRepeat = 1000000;
+
+/// Statements and expressions one manifest may execute. A manifest is
+/// configuration, not a program: the largest real one runs a few thousand.
+/// Nested loops stay inside `_maxRange` and still reach 1e12 steps, which
+/// is hours of a frozen UI isolate, since this runs synchronously.
+const _maxSteps = 5000000;
+
+/// What a manifest's `open()` may read, and what a filesystem probe costs
+/// against the step budget - a stat is ~300 interpreter steps.
+const _maxOpenBytes = 4 << 20;
+const _ioStepCost = 300;
+
 class _Interpreter {
   _Interpreter({required this.manifestPath, required this.environment});
 
@@ -1558,6 +1599,13 @@ class _Interpreter {
     'sep': Platform.pathSeparator,
   });
   int _depth = 0;
+  int _steps = 0;
+
+  void _step(int line, [int cost = 1]) {
+    if ((_steps += cost) > _maxSteps) {
+      _fail(line, 'too much work for a manifest: the step budget is spent');
+    }
+  }
 
   List<FamCall> run(List<_Stmt> program, Set<String> names) {
     final calls = <FamCall>[];
@@ -1600,6 +1648,7 @@ class _Interpreter {
 
   void _statement(_Stmt statement, _Scope scope) {
     final line = statement.line;
+    _step(line);
     switch (statement) {
       case final _ExprStmt s:
         _eval(s.expr, scope);
@@ -2164,8 +2213,8 @@ class _Interpreter {
         unsupported();
       case '*':
         if (numbers) return a * b;
-        if (a is int && (b is String || b is List)) return _repeat(b, a);
-        if (b is int && (a is String || a is List)) return _repeat(a, b);
+        if (a is int && (b is String || b is List)) return _repeat(b, a, line);
+        if (b is int && (a is String || a is List)) return _repeat(a, b, line);
         unsupported();
       case '/':
         if (!numbers) unsupported();
@@ -2179,16 +2228,23 @@ class _Interpreter {
         var remainder = a.remainder(b);
         if (remainder != 0 && (remainder < 0) != (b < 0)) remainder += b;
         if (op == '%') return remainder;
-        final quotient = (a - remainder) / b;
-        return a is int && b is int
-            ? quotient.round()
-            : quotient.floorToDouble();
+        // Integer floor division stays in integer arithmetic: routed
+        // through double it rounds, silently, above 2^53.
+        if (a is int && b is int) return (a - remainder) ~/ b;
+        return ((a - remainder) / b).floorToDouble();
     }
     unsupported();
   }
 
-  Object _repeat(Object? sequence, int count) {
+  Object _repeat(Object? sequence, int count, int line) {
     final times = count < 0 ? 0 : count;
+    final width = sequence is String
+        ? sequence.length
+        : (sequence as List).length;
+    if (width != 0 && times > _maxRepeat ~/ width) {
+      _fail(line, 'the result of * is too large');
+    }
+    _step(line, times * width);
     if (sequence is String) return sequence * times;
     final list = sequence as List;
     final items = [for (var i = 0; i < times; i++) ...list];
@@ -2254,6 +2310,10 @@ class _Interpreter {
 
   Object? _findKey(Map<Object?, Object?> map, Object? key) {
     if (map.containsKey(key)) return key;
+    // _eq differs from == only for collections, so for every other key a
+    // miss is a miss. Without this, building a dict by assignment is
+    // quadratic: 4000 keys took 55 ms.
+    if (key is! List && key is! Map) return _missing;
     for (final candidate in map.keys) {
       if (_eq(candidate, key)) return candidate;
     }
@@ -2331,10 +2391,16 @@ class _Interpreter {
     } on FileSystemException {
       _fail(line, "FileNotFoundError: No such file or directory: '$path'");
     }
-    final text = utf8
-        .decode(bytes, allowMalformed: true)
-        .replaceAll('\r\n', '\n')
-        .replaceAll('\r', '\n');
+    if (bytes.length > _maxOpenBytes) {
+      _fail(line, "open() refuses a file this large: '$path'");
+    }
+    _step(line, _ioStepCost);
+    final decoded = utf8.decode(bytes, allowMalformed: true);
+    // Two chained replaceAll cost four times the read itself, and most
+    // files have no CR at all.
+    final text = decoded.contains('\r')
+        ? decoded.replaceAll('\r\n', '\n').replaceAll('\r', '\n')
+        : decoded;
     return _TextFile(text);
   }
 
@@ -2375,10 +2441,29 @@ class _Interpreter {
       return value.truncate();
     }
     if (value is String && base is int) {
-      final parsed = int.tryParse(
-        value.trim().replaceAll('_', ''),
-        radix: base,
-      );
+      if (base != 0 && (base < 2 || base > 36)) {
+        _fail(line, 'ValueError: int() base must be >= 2 and <= 36, or 0');
+      }
+      var text = value.trim().replaceAll('_', '');
+      var radix = base;
+      var sign = '';
+      if (text.startsWith('-') || text.startsWith('+')) {
+        if (text.startsWith('-')) sign = '-';
+        text = text.substring(1);
+      }
+      // Python takes an 0x/0o/0b prefix when the base agrees with it, and
+      // detects it when the base is 0. int.tryParse takes neither, and a
+      // base outside 2..36 is a RangeError rather than a ValueError.
+      const prefixes = {'0x': 16, '0o': 8, '0b': 2};
+      final prefix = text.length > 1 ? text.substring(0, 2).toLowerCase() : '';
+      final prefixRadix = prefixes[prefix];
+      if (prefixRadix != null && (radix == 0 || radix == prefixRadix)) {
+        radix = prefixRadix;
+        text = text.substring(2);
+      } else if (radix == 0) {
+        radix = 10;
+      }
+      final parsed = int.tryParse('$sign$text', radix: radix);
       if (parsed != null) return parsed;
       _fail(
         line,
@@ -2623,7 +2708,10 @@ String _replace(String s, List<Object?> args, int line) {
     if (index < 0) break;
     result = result.replaceRange(index, index + from.length, to);
     start = index + to.length;
-    if (from.isEmpty) start++;
+    // An empty needle matches between every character, so the cursor has
+    // to advance by hand - and it can then pass the end of the string,
+    // where indexOf range-checks.
+    if (from.isEmpty && ++start > result.length) break;
   }
   return result;
 }
@@ -2633,7 +2721,9 @@ String _join(String separator, List<Object?> args, int line) {
   final value = args.first;
   final Iterable<Object?> items = switch (value) {
     final List<Object?> list => list,
-    final String s => s.split(''),
+    // len() and iteration count runes; splitting by code unit here would
+    // give a third answer for an astral character.
+    final String s => [for (final rune in s.runes) String.fromCharCode(rune)],
     _ => _fail(line, "TypeError: can only join an iterable"),
   };
   return items
