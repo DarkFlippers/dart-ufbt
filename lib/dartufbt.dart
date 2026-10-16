@@ -1,3 +1,4 @@
+export 'core/command_line.dart';
 export 'core/ufbt_paths.dart';
 export 'core/ufbt_state.dart';
 export 'log/console_sink.dart';

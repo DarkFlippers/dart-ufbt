@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 
+import '../core/command_line.dart';
 import '../core/ufbt_paths.dart';
 import '../log/logger.dart';
 import 'api_symbols.dart';
@@ -16,9 +17,21 @@ import 'sdk_opts.dart';
 import 'source_glob.dart';
 
 class FapBuildException implements Exception {
-  const FapBuildException(this.message);
+  const FapBuildException(this.message, {this.diagnostics});
 
   final String message;
+
+  /// What ran, for whoever reads the report: the working directory and the
+  /// command line. Kept out of [toString] because that is the line the UI
+  /// shows and a compile carries kilobytes of argv; [reported] is the form
+  /// for a log, and the only place the evidence survives - the build output
+  /// goes to the console through `raw`, which carries no level and so reaches
+  /// no sink that keeps anything.
+  final String? diagnostics;
+
+  /// The message with its [diagnostics] under it, for a log rather than a UI.
+  String get reported =>
+      diagnostics == null ? message : '$message\n$diagnostics';
 
   @override
   String toString() => message;
@@ -130,7 +143,7 @@ class FapBuilder {
       } on FapEnvironmentException {
         rethrow;
       } on FapBuildException catch (e) {
-        logger.error('$e');
+        logger.error(e.reported);
         results.add(FapBuildResult(success: false, app: app, error: '$e'));
         break;
       }
@@ -159,7 +172,7 @@ class FapBuilder {
       } on FapEnvironmentException {
         rethrow;
       } on FapBuildException catch (e) {
-        logger.error('$e');
+        logger.error(e.reported);
         results.add(FapBuildResult(success: false, app: item, error: '$e'));
         break;
       }
@@ -501,13 +514,10 @@ class FapBuilder {
     FlipperApplication app,
     SdkOpts opts,
   ) async {
-    final result = await Process.run(_tool('nm'), ['-P', '-u', fap.path]);
-    if (result.exitCode != 0) {
-      throw FapBuildException('nm failed: ${result.stderr}');
-    }
+    final symbolTable = await _run(_tool('nm'), ['-P', '-u', fap.path]);
 
     final imported = <String>{};
-    for (final line in const LineSplitter().convert(result.stdout as String)) {
+    for (final line in const LineSplitter().convert(symbolTable)) {
       final name = line.split(RegExp(r'\s+')).first;
       if (name.isNotEmpty) imported.add(name);
     }
@@ -535,40 +545,53 @@ class FapBuilder {
     return unresolved;
   }
 
-  Directory get _scriptRoot =>
-      Directory(UfbtPaths.join(paths.sdkScriptsDir.path, 'ufbt'));
+  /// Where tools run: the ufbt script directory, or null when the SDK has
+  /// none and they should inherit this process's.
+  String? get _scriptRoot {
+    final dir = Directory(UfbtPaths.join(paths.sdkScriptsDir.path, 'ufbt'));
+    return dir.existsSync() ? dir.path : null;
+  }
 
-  Future<void> _run(String executable, List<String> arguments) async {
-    if (logger.verbose) logger.raw('$executable ${arguments.join(' ')}');
-    final workingDirectory = _scriptRoot;
+  /// Runs [executable] and answers its stdout, throwing [FapBuildException]
+  /// when it exits non-zero.
+  Future<String> _run(String executable, List<String> arguments) async {
+    final command = quotedCommandLine(executable, arguments);
+    if (logger.verbose) logger.raw(command);
+    final cwd = _scriptRoot;
     final result = await Process.run(
       executable,
       arguments,
-      workingDirectory: workingDirectory.existsSync()
-          ? workingDirectory.path
-          : null,
+      workingDirectory: cwd,
     );
+    final out = result.stdout as String;
     if (result.exitCode == 0) {
-      final stderrText = (result.stderr as String).trim();
-      if (stderrText.isNotEmpty) {
-        for (final line in const LineSplitter().convert(stderrText)) {
-          logger.raw(line);
-        }
-      }
-      return;
+      _echo((result.stderr as String).trim());
+      return out;
     }
 
     final output = [
-      (result.stdout as String).trim(),
+      out.trim(),
       (result.stderr as String).trim(),
     ].where((text) => text.isNotEmpty).join('\n');
-    for (final line in const LineSplitter().convert(output)) {
-      logger.raw(line);
-    }
+    _echo(output);
     throw FapBuildException(
       '${executable.split(Platform.pathSeparator).last} failed with exit code '
       '${result.exitCode}',
+      diagnostics: [
+        // Worth saying, because it is the one failure the output cannot
+        // explain: a compiler rejecting source always writes a diagnostic, so
+        // silence points at the toolchain rather than at the app.
+        if (output.isEmpty) 'it wrote nothing to stdout or stderr',
+        'ran in: ${cwd ?? Directory.current.path}',
+        command,
+      ].join('\n'),
     );
+  }
+
+  void _echo(String text) {
+    for (final line in const LineSplitter().convert(text)) {
+      logger.raw(line);
+    }
   }
 
   static bool _isCpp(String path) =>
