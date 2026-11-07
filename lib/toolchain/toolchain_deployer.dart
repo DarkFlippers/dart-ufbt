@@ -109,12 +109,7 @@ class UfbtToolchainDeployer {
     } else {
       logger.raw('no');
       logger.raw('Downloading toolchain:');
-      try {
-        await fetcher.fetchFile(info.url, _archiveDir, usePartFile: true);
-      } catch (_) {
-        logger.raw('Failed to download ${info.url}');
-        return false;
-      }
+      if (!await _download(info, usePartFile: true)) return false;
       logger.raw('done');
     }
 
@@ -158,6 +153,27 @@ class UfbtToolchainDeployer {
     return true;
   }
 
+  /// Fetches the toolchain archive, answering whether it arrived.
+  ///
+  /// The reason this reports the cause, and at a level a consumer can route:
+  /// both call sites used `logger.raw`, which carries no level, so in
+  /// qUnleashed a failure reached an in-memory console and nothing else. A
+  /// full disk and a dead network both read as one line naming the URL, and
+  /// the only thing reported was `Toolchain deploy failed` a layer up with no
+  /// reason attached to it.
+  Future<bool> _download(
+    UfbtToolchainInfo info, {
+    bool usePartFile = false,
+  }) async {
+    try {
+      await fetcher.fetchFile(info.url, _archiveDir, usePartFile: usePartFile);
+      return true;
+    } catch (e) {
+      logger.error('Failed to download ${info.url}: $e');
+      return false;
+    }
+  }
+
   Future<bool> _deployWindows(UfbtToolchainInfo info) async {
     final archiveName = info.url.split('/').last;
     final distDirName = archiveName.replaceAll('-${info.version}.zip', '');
@@ -167,13 +183,7 @@ class UfbtToolchainDeployer {
 
     if (!archiveFile.existsSync()) {
       logger.raw('Downloading Windows toolchain..', newline: false);
-      try {
-        await fetcher.fetchFile(info.url, _archiveDir);
-      } catch (e) {
-        logger.raw('An error occurred');
-        logger.raw('$e');
-        return false;
-      }
+      if (!await _download(info)) return false;
       logger.raw('done!');
     }
 
